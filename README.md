@@ -60,6 +60,11 @@ Default value: `null`
 
 When provide this option like this: `"global_context_file" : "my_global_context.json"`. The context of `my_global_context.json` will apply to all rendered tempates. 
 
+#### options.maximum_concurrent_processes
+Type: `int`
+Default value: `null`
+
+When provided, this option will limit the number concurrent rendering processes to the specified value. If you are receiving EAGAIN or EMFILE errors, this option might just save you.
 
 ### Usage Examples
 

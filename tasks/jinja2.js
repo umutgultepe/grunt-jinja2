@@ -45,7 +45,7 @@ module.exports = function(grunt) {
       }
   });
 
-  var jinja2ShellPath = bin.path
+  var jinja2ShellPath = bin.path;
 
   grunt.registerMultiTask('jinja2', 'render jinja2 template to html using original jinja2 (in python)', function() {
     // Merge task-specific and/or target-specific options with these defaults.
@@ -54,7 +54,8 @@ module.exports = function(grunt) {
 
     var options = this.options({
       context_path:'context',
-      template_path:'templates'
+      template_path:'templates',
+      maximum_concurrent_processes: 'maximum_concurrent_processes'
     });
 
     if(!grunt.file.exists(options.context_path)){
@@ -62,6 +63,12 @@ module.exports = function(grunt) {
     }
     if(!grunt.file.exists(options.template_path)){
       grunt.log.warn('Template path "' + options.template_path + '" not found.');
+    }
+    grunt.log.warn(options.maximum_concurrent_processes);
+    if (options.maximum_concurrent_processes &&
+        options.maximum_concurrent_processes !== "maximum_concurrent_processes" &&
+        typeof(options.maximum_concurrent_processes) !== "number") {
+      grunt.fail.warn('Maximum process count must be an integer.');
     }
     if (!/\/$/.test(options.template_path)) options.template_path += path.sep;
     if (!/\/$/.test(options.context_path)) options.context_path += path.sep;
@@ -82,51 +89,63 @@ module.exports = function(grunt) {
         }
     });
 
+    var activeProcesses = 0,
+        maxProcesses = options.maximum_concurrent_processes;
     async.forEach(valid_files, function(f, cb) {
       //ignore multi src files
       var src = f.src[0];
       //get relative path
-      var template_path = src.replace(options.template_path,'')
+      var template_path = src.replace(options.template_path,'');
       //get context path form relative path
-      var context_path = options.context_path + template_path.replace(/\.\w+$/,'.json')
+      var context_path = options.context_path + template_path.replace(/\.\w+$/,'.json');
       //test context file
-      var use_context = grunt.file.exists(context_path) && grunt.file.readJSON(context_path)
+      var use_context = grunt.file.exists(context_path) && grunt.file.readJSON(context_path);
       //global context file
-      var global_context_file = options.global_context_file
+      var global_context_file = options.global_context_file;
 
-      var args = ['-t', template_path, '-b', options.template_path]
+      var args = ['-t', template_path, '-b', options.template_path];
       if (use_context && global_context_file){
-        var combinedPath = context_path + "," + global_context_file
+        var combinedPath = context_path + "," + global_context_file;
         // args.push('-d', combinedPath)
-        args.push('-d', combinedPath)
+        args.push('-d', combinedPath);
         console.log("combinedPath", combinedPath);
       } else if(use_context) {
         args.push('-d', context_path)
       } else if(global_context_file) {
         args.push('-d', global_context_file)
       }
-      // grunt.log.writeln(template_path, context_path, args);
-      //run python command
-      var child = grunt.util.spawn({
-          cmd: jinja2ShellPath,
-          args: args,
-          // opts: {stdio: 'inherit'}
-      }, function (error, result, code) {
-        if (error) {
-          grunt.log.warn('Error occured in rendering file "' + f.dest + '". message below:');
-          grunt.log.warn(error)
-          return cb(error);
-        }else if(result){
-          grunt.file.write(f.dest, result.stdout);
-          if(use_context){
-            grunt.log.writeln('File "' + f.dest + '" created with context "' + context_path + '".');
-          } else {
-            grunt.log.writeln('File "' + f.dest + '" created without context.');
-          }
-          cb();
-        }
-      });
 
+      // grunt.log.writeln(template_path, context_path, args);
+      function render(args) {
+        if (maxProcesses && activeProcesses >= maxProcesses) {
+          // Wait until some processes complete
+          setTimeout(function () {render(args);}, 1000);
+        } else {
+          //run python command
+          activeProcesses += 1;
+          var child = grunt.util.spawn({
+            cmd: jinja2ShellPath,
+            args: args
+            // opts: {stdio: 'inherit'}
+          }, function (error, result, code) {
+            activeProcesses -= 1;
+            if (error) {
+              grunt.log.warn('Error occured in rendering file "' + f.dest + '". message below:');
+              grunt.log.warn(error);
+              return cb(error);
+            } else if(result){
+              grunt.file.write(f.dest, result.stdout);
+              if(use_context){
+                grunt.log.writeln('File "' + f.dest + '" created with context "' + context_path + '".');
+              } else {
+                grunt.log.writeln('File "' + f.dest + '" created without context.');
+              }
+              cb();
+            }
+          });
+        }
+      }
+      render(args);
     },function(error) {
       done(!error);
     });
